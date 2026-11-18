@@ -110,7 +110,23 @@ not on `localhost`.
 - [CONTRIBUTING.md](CONTRIBUTING.md): issues and pull requests
 - [SECURITY.md](SECURITY.md): reporting a vulnerability
 
+## Credits
+
+**This is AI-written code, and that is not hidden here.** The plugin, the web client part, the test server,
+the tests and this documentation were written by Claude (Anthropic), working from my requirements, my bug
+reports and my judgement about what the plugin should do: I specified, tested and decided; Claude wrote.
+Every design decision, every measurement quoted in the docs and every fix went through that loop. If that
+is a dealbreaker for you, you know it before you clone rather than after.
+
+Built on [Jellyfin](https://github.com/jellyfin/jellyfin) and its web client. The feature set answers
+long-standing requests in the Jellyfin trackers, among them per-user playlist sharing
+([jellyfin-web#4698](https://github.com/jellyfin/jellyfin-web/issues/4698)) and playlist images for owners
+([jellyfin-web#5641](https://github.com/jellyfin/jellyfin-web/issues/5641)). This plugin is not affiliated
+with or endorsed by the Jellyfin project.
+
 ## License
 
+Copyright (C) 2026 BriskWatchdogz1.
+
 GPL-3.0-or-later, see [LICENSE](LICENSE). The plugin links against Jellyfin, which is licensed under the
-GPL.
+GPL. It comes without any warranty.
