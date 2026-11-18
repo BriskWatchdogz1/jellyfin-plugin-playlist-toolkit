@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Playlist Toolkit</title>
+</head>
+<body>
+<div id="PlaylistToolkitConfigPage" data-role="page" class="page type-interior pluginConfigurationPage" data-require="emby-input,emby-button,emby-checkbox">
+    <div data-role="content">
+        <div class="content-primary">
+            <form id="PlaylistToolkitConfigForm">
+                <h2 class="sectionTitle">Playlist Toolkit</h2>
+                <label class="checkboxContainer">
+                    <input is="emby-checkbox" type="checkbox" id="InjectClientScript" />
+                    <span>Load the client script in the web client</span>
+                </label>
+                <div class="fieldDescription checkboxFieldDescription">Without the script only the API is available. Reload the browser tab after changing this.</div>
+                <label class="checkboxContainer">
+                    <input is="emby-checkbox" type="checkbox" id="EnableTrackTable" />
+                    <span>Show the sortable track table in playlists</span>
+                </label>
+                <label class="checkboxContainer">
+                    <input is="emby-checkbox" type="checkbox" id="EnableDuplicateWarning" />
+                    <span>Warn before adding tracks that are already in the playlist</span>
+                </label>
+                <label class="checkboxContainer">
+                    <input is="emby-checkbox" type="checkbox" id="EditorsCanEditDetails" />
+                    <span>Users with edit permission may change image and description (not only the owner)</span>
+                </label>
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="MaxQueueSize">Tracks per queue request</label>
+                    <input is="emby-input" type="number" id="MaxQueueSize" min="1" max="220" required />
+                    <div class="fieldDescription">Smart shuffle and "play from here" play the whole list; the web client takes it over in parts of this size. One request of the web client can carry about 227 tracks on Jellyfin 12.4.0 (229 exceed the server's URL limit).</div>
+                </div>
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="SmartShuffleRecentHours">Smart shuffle: hours a track counts as recently played</label>
+                    <input is="emby-input" type="number" id="SmartShuffleRecentHours" min="0" required />
+                </div>
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="MaxImageSizeMb">Maximum image size (MB)</label>
+                    <input is="emby-input" type="number" id="MaxImageSizeMb" min="1" required />
+                </div>
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="MaxDescriptionLength">Maximum description length (characters)</label>
+                    <input is="emby-input" type="number" id="MaxDescriptionLength" min="0" required />
+                </div>
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="MaxImportSizeKb">Maximum M3U import size (KB)</label>
+                    <input is="emby-input" type="number" id="MaxImportSizeKb" min="1" required />
+                </div>
+                <div>
+                    <button is="emby-button" type="submit" class="raised button-submit block emby-button"><span>Save</span></button>
+                </div>
+                <h2 class="sectionTitle" style="margin-top:2em">All playlists</h2>
+                <div class="fieldDescription">As an administrator you can open every playlist of every user, also private ones: image, description, sharing and tracks.</div>
+                <div>
+                    <button is="emby-button" type="button" id="PlaylistToolkitOpenAdmin" class="raised block emby-button"><span>Manage all playlists</span></button>
+                </div>
+            </form>
+        </div>
+    </div>
+    <script type="text/javascript">
+        (function () {
+            var pluginId = 'fd26499b-e4c1-4a7d-8648-a898f06e647b';
+            var checkboxes = ['InjectClientScript', 'EnableTrackTable', 'EnableDuplicateWarning', 'EditorsCanEditDetails'];
+            var numbers = ['MaxQueueSize', 'SmartShuffleRecentHours', 'MaxImageSizeMb', 'MaxDescriptionLength', 'MaxImportSizeKb'];
+            var page = document.querySelector('#PlaylistToolkitConfigPage');
+
+            page.addEventListener('pageshow', function () {
+                Dashboard.showLoadingMsg();
+                ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                    checkboxes.forEach(function (id) { page.querySelector('#' + id).checked = !!config[id]; });
+                    numbers.forEach(function (id) { page.querySelector('#' + id).value = config[id]; });
+                    Dashboard.hideLoadingMsg();
+                });
+            });
+
+            page.querySelector('#PlaylistToolkitOpenAdmin').addEventListener('click', function () {
+                if (window.__playlistToolkit && window.__playlistToolkit.openAdmin) {
+                    window.__playlistToolkit.openAdmin();
+                } else {
+                    Dashboard.alert('The client script is not loaded. Enable "Load the client script in the web client" and reload the page.');
+                }
+            });
+
+            page.querySelector('#PlaylistToolkitConfigForm').addEventListener('submit', function (e) {
+                e.preventDefault();
+                Dashboard.showLoadingMsg();
+                ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                    checkboxes.forEach(function (id) { config[id] = page.querySelector('#' + id).checked; });
+                    numbers.forEach(function (id) { config[id] = parseInt(page.querySelector('#' + id).value, 10); });
+                    ApiClient.updatePluginConfiguration(pluginId, config).then(Dashboard.processPluginConfigurationUpdateResult);
+                });
+                return false;
+            });
+        })();
+    </script>
+</div>
+</body>
+</html>

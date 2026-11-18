@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Jellyfin.Plugin.PlaylistToolkit</RootNamespace>
+    <AssemblyName>Jellyfin.Plugin.PlaylistToolkit</AssemblyName>
+    <AssemblyVersion>$(PluginVersion)</AssemblyVersion>
+    <FileVersion>$(PluginVersion)</FileVersion>
+    <Version>$(PluginVersion)</Version>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Jellyfin.Controller" Version="$(JellyfinVersion)">
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
+    <PackageReference Include="Jellyfin.Model" Version="$(JellyfinVersion)">
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Configuration\configPage.html" />
+    <EmbeddedResource Include="Web\client.js" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Jellyfin.Plugin.PlaylistToolkit.Tests" />
+  </ItemGroup>
+
+</Project>

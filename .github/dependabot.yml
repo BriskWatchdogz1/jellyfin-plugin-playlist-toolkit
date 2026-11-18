@@ -1,0 +1,14 @@
+# Weekly update checks for the NuGet packages of the plugin and its tests, and for the GitHub Actions
+# used in the workflows.
+version: 2
+updates:
+  - package-ecosystem: nuget
+    directories:
+      - /src/Jellyfin.Plugin.PlaylistToolkit
+      - /tests/Jellyfin.Plugin.PlaylistToolkit.Tests
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

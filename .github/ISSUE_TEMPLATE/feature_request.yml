@@ -1,0 +1,28 @@
+name: Feature request
+description: Suggest a change or an addition.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Larger changes are best discussed here before anybody writes code; see CONTRIBUTING.md. The plugin is maintained for the current Jellyfin release only.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What do you want to do that the plugin does not let you do?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What should it do instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: who
+    attributes:
+      label: Who would use it?
+      description: Playlist owners, users a playlist is shared with, administrators?

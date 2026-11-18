@@ -1,0 +1,33 @@
+# Builds the plugin and runs the unit tests on every push and pull request.
+# Needs no secrets; the only network access is the NuGet restore. Nothing is pushed anywhere.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: |
+          dotnet restore src/Jellyfin.Plugin.PlaylistToolkit
+          dotnet restore tests/Jellyfin.Plugin.PlaylistToolkit.Tests
+
+      - name: Unit tests
+        run: dotnet test tests/Jellyfin.Plugin.PlaylistToolkit.Tests --no-restore --nologo
+
+      - name: Build the plugin
+        run: dotnet publish src/Jellyfin.Plugin.PlaylistToolkit -c Release --no-restore --nologo -o publish

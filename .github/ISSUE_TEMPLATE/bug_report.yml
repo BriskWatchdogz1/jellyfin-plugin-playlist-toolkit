@@ -1,0 +1,82 @@
+name: Bug report
+description: Something does not work as the documentation says.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Never paste access tokens, passwords, API keys or your server's public address.** Read every log line below before you paste it and replace such values with `<removed>`. User and playlist names can be replaced too.
+
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Plugin version
+      description: Dashboard → Plugins → Playlist Toolkit.
+      placeholder: "1.1.0.0"
+    validations:
+      required: true
+
+  - type: input
+    id: jellyfin-version
+    attributes:
+      label: Jellyfin version
+      description: Dashboard → Overview (server version).
+      placeholder: "12.4.0"
+    validations:
+      required: true
+
+  - type: input
+    id: client
+    attributes:
+      label: Client
+      description: Browser and its version, or the app that shows the web client.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: role
+    attributes:
+      label: Your role for the playlist
+      options:
+        - Owner
+        - User with "can edit"
+        - User with "can listen"
+        - Administrator
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+
+  - type: textarea
+    id: seen
+    attributes:
+      label: What did you see instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Browser console
+      description: Lines starting with `[PlaylistToolkit]` from the browser's developer console (F12), if any.
+      render: text
+
+  - type: textarea
+    id: server-log
+    attributes:
+      label: Server log
+      description: The lines around the problem from the Jellyfin log, if the server part is affected.
+      render: text
+
+  - type: checkboxes
+    id: no-secrets
+    attributes:
+      label: Before you submit
+      options:
+        - label: Nothing above contains an access token, a password or a public server address.
+          required: true

@@ -1,0 +1,21 @@
+# Local test server. Never points at the real server; data lives under testserver/ (git-ignored).
+#   ./testserver/deploy.sh      copy the current build into the server and (re)start it
+services:
+  jellyfin-test:
+    image: ${JELLYFIN_IMAGE:-lscr.io/linuxserver/jellyfin:version-12.4ubu2604}
+    container_name: ${TEST_CONTAINER:-jellyfin-playlisttoolkit-test}
+    environment:
+      - PUID=${TEST_UID:-1000}
+      - PGID=${TEST_GID:-1000}
+      - TZ=${TZ:-Etc/UTC}
+    ports:
+      # Local only: the test server is not meant to be reachable from the network.
+      - "127.0.0.1:${TEST_PORT:-18096}:8096"
+    volumes:
+      - ./config:/config
+      - ./music:/data/music:ro
+      - ./music-private:/data/music-private:ro
+      # A copy of the build (made by deploy.sh): Jellyfin rewrites meta.json in its plugin folder.
+      # The folder name carries no version; Jellyfin reads it from meta.json.
+      - ./.state/plugin:/config/data/plugins/PlaylistToolkit
+    restart: "no"

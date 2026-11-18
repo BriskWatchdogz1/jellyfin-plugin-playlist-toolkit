@@ -1,0 +1,10 @@
+bin/
+obj/
+.nuget/
+testserver/config/
+testserver/music/
+testserver/music-private/
+testserver/.state/
+*.swp
+__pycache__/
+dist/
