@@ -24,6 +24,10 @@
                     <span>Warn before adding tracks that are already in the playlist</span>
                 </label>
                 <label class="checkboxContainer">
+                    <input is="emby-checkbox" type="checkbox" id="SmartShuffleSkipDisliked" />
+                    <span>Smart shuffle leaves out songs the user disliked</span>
+                </label>
+                <label class="checkboxContainer">
                     <input is="emby-checkbox" type="checkbox" id="EditorsCanEditDetails" />
                     <span>Users with edit permission may change image and description (not only the owner)</span>
                 </label>
@@ -62,7 +66,7 @@
     <script type="text/javascript">
         (function () {
             var pluginId = 'fd26499b-e4c1-4a7d-8648-a898f06e647b';
-            var checkboxes = ['InjectClientScript', 'EnableTrackTable', 'EnableDuplicateWarning', 'EditorsCanEditDetails'];
+            var checkboxes = ['InjectClientScript', 'EnableTrackTable', 'EnableDuplicateWarning', 'SmartShuffleSkipDisliked', 'EditorsCanEditDetails'];
             var numbers = ['MaxQueueSize', 'SmartShuffleRecentHours', 'MaxImageSizeMb', 'MaxDescriptionLength', 'MaxImportSizeKb'];
             var page = document.querySelector('#PlaylistToolkitConfigPage');
 

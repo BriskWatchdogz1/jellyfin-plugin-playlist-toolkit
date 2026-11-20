@@ -1,6 +1,6 @@
 # Architecture
 
-State: plugin 1.1.0.0, Jellyfin 12.4.0.
+State: plugin 1.2.0.0, Jellyfin 12.4.0.
 
 ## Overview
 
@@ -107,7 +107,7 @@ endpoint.
 - **Duplicates**: albums, artists, genres and folders are expanded to tracks exactly as the stock add does.
   `exact` = the same library item is already in the playlist; `similar` = another item with the same
   title and first artist (for example the album and the single version).
-- **Smart shuffle** (`SmartShuffler`): tracks are grouped by first artist (track artist, else album
+- **Smart shuffle** (`SmartShuffler`): songs the caller disliked (Jellyfin's rating, `Likes == false`) do not take part, unless nothing else is left (setting `SmartShuffleSkipDisliked`, default on; `SmartShuffler.WithoutDisliked`). Tracks are grouped by first artist (track artist, else album
   artist; tracks without artist never block each other). With R tracks left and artist L played last, an
   order without repeats exists exactly when no other artist has more than ⌈R/2⌉ tracks and L at most
   ⌊R/2⌋. Each step picks a random track among the artists that keep this true, so a repeat only happens

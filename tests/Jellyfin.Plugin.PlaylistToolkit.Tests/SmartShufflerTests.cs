@@ -237,4 +237,18 @@ public class SmartShufflerTests
         Assert.Equal(5000, order.Count);
         Assert.True(watch.ElapsedMilliseconds < 2000, $"took {watch.ElapsedMilliseconds} ms");
     }
+
+    [Fact]
+    public void WithoutDislikedDropsDislikedItemsAndKeepsOrder()
+    {
+        var kept = SmartShuffler.WithoutDisliked(new[] { 1, 2, 3, 4, 5 }, i => i % 2 == 0);
+        Assert.Equal([1, 3, 5], kept);
+    }
+
+    [Fact]
+    public void WithoutDislikedKeepsEverythingWhenAllAreDisliked()
+    {
+        Assert.Equal([1, 2], SmartShuffler.WithoutDisliked(new[] { 1, 2 }, _ => true));
+        Assert.Empty(SmartShuffler.WithoutDisliked(Array.Empty<int>(), _ => true));
+    }
 }

@@ -218,6 +218,11 @@ public class PlaylistContentService
     {
         var items = GetVisibleEntries(playlist, user).Select(e => e.Item2).ToList();
         var userData = _userDataManager.GetUserDataBatch(items, user);
+        if (Plugin.Instance?.Configuration.SmartShuffleSkipDisliked ?? true)
+        {
+            // Songs the caller disliked (Jellyfin's own rating) do not take part, unless nothing else is left.
+            items = SmartShuffler.WithoutDisliked(items, i => userData.TryGetValue(i.Id, out var d) && d.Likes == false);
+        }
 
         var waiting = pending is null ? null : new HashSet<Guid>(pending);
         var tracks = new ShuffleTrack[items.Count];

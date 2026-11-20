@@ -12,7 +12,7 @@ The code of this plugin was written by Claude (Anthropic), an AI model, and is p
 | 1 | Set, replace and remove the playlist image as the owner (stock Jellyfin: administrators only) | Playlist page → `…` → *Image and description* |
 | 2 | Track table with the columns title, artist, album, duration; click a header to sort (third click returns to playlist order) | Playlist page |
 | 3 | Share a playlist with selected users, per user "can listen" or "can edit", plus the stock "public" switch | Playlist page → `…` → *Share* |
-| 4 | Smart shuffle: never the same artist twice in a row, recently played tracks last. The whole playlist is queued. With *Endless* (default on, remembered per user) the playlist is shuffled again when it is through and keeps playing | Playlist page → *Smart shuffle*, switch *Endless* |
+| 4 | Smart shuffle: never the same artist twice in a row, recently played tracks last. The whole playlist is queued. With *Endless* (default on, remembered per user) the playlist is shuffled again when it is through and keeps playing. Since 1.2.0.0 it also leaves out songs the user disliked (setting *Smart shuffle leaves out songs the user disliked*, default on) | Playlist page → *Smart shuffle*, switch *Endless* |
 | 5 | Warning before adding tracks that are already in the playlist, with a choice per track | Stock *Add to playlist* dialog |
 | 6 | Description text for a playlist | Playlist page → `…` → *Image and description* |
 | 7 | Filter inside a playlist; M3U export and import | Playlist page |
@@ -21,7 +21,8 @@ The code of this plugin was written by Claude (Anthropic), an AI model, and is p
 The table only keeps the visible rows in the page, so playlists with thousands of tracks scroll, sort and
 filter without delay (measured with 2,500 tracks: rows load in 0.2 s, sorting takes 10 ms).
 
-Jellyfin's *Instant Mix* and its stock *Shuffle* button are not touched. The web client is shown in
+Playlist Toolkit does not touch Jellyfin's *Instant Mix* or its stock *Shuffle* button; the stock *Shuffle* button is
+filtered by the separate Dislike plugin (see Compatibility). The web client is shown in
 English or German, following the language of the web client page (else the browser).
 
 Who may do what:
@@ -48,6 +49,9 @@ Tested with Jellyfin **12.4.0** (server and web client). The plugin is maintaine
 release only; older Jellyfin versions are not supported. A plugin build targets one Jellyfin version; see
 [docs/update-jellyfin.md](docs/update-jellyfin.md) for building it against another one.
 
+- The thumbs-down button comes from the separate plugin
+  [Dislike](https://github.com/BriskWatchdogz1/jellyfin-plugin-dislike); both plugins are tested together.
+  Dislike also links back to Playlist Toolkit.
 - No other plugin is needed. The plugin adds its script to the web client itself while `index.html` is
   served; nothing on disk is modified.
 - The table, dialogs and the duplicate warning exist in the web client (browser, and apps that show the

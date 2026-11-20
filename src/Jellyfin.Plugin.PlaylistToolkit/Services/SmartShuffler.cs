@@ -10,6 +10,21 @@ namespace Jellyfin.Plugin.PlaylistToolkit.Services;
 /// </summary>
 public static class SmartShuffler
 {
+    /// <summary>
+    /// Leaves out the items the caller disliked. If that would leave nothing, the list is returned unchanged.
+    /// </summary>
+    /// <typeparam name="T">Item type.</typeparam>
+    /// <param name="items">Items in playlist order.</param>
+    /// <param name="isDisliked">Tells whether the caller disliked an item.</param>
+    /// <returns>The remaining items, order kept.</returns>
+    public static List<T> WithoutDisliked<T>(IReadOnlyList<T> items, Func<T, bool> isDisliked)
+    {
+        ArgumentNullException.ThrowIfNull(items);
+        ArgumentNullException.ThrowIfNull(isDisliked);
+        var kept = items.Where(i => !isDisliked(i)).ToList();
+        return kept.Count == 0 ? items.ToList() : kept;
+    }
+
     private const int TierCount = 4;
     private const int WaitingTier = 3;
 

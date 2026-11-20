@@ -42,6 +42,12 @@ public class PluginConfiguration : BasePluginConfiguration
     public int SmartShuffleRecentHours { get; set; } = 72;
 
     /// <summary>
+    /// Gets or sets a value indicating whether smart shuffle leaves out songs the caller disliked
+    /// (Jellyfin's per-user rating, <c>Likes == false</c>).
+    /// </summary>
+    public bool SmartShuffleSkipDisliked { get; set; } = true;
+
+    /// <summary>
     /// Gets or sets the maximum accepted image upload size in megabytes.
     /// </summary>
     public int MaxImageSizeMb { get; set; } = 10;

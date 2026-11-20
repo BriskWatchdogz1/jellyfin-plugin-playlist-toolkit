@@ -375,6 +375,17 @@ def main():
     seeded = [alice.get(f"/PlaylistToolkit/Playlists/{big_pid}/SmartShuffle", params={"seed": "5"}).json()["ItemIds"] for _ in range(2)]
     check("smart shuffle is reproducible with a seed", seeded[0] == seeded[1])
 
+    # Songs the caller disliked (Jellyfin's own rating) are left out of the smart shuffle; other users are not affected.
+    disliked_ids = order[:3]
+    for track_id in disliked_ids:
+        alice.post(f"/UserItems/{track_id}/Rating", params={"userId": alice.user_id, "likes": "false"})
+    try:
+        without = alice.get(f"/PlaylistToolkit/Playlists/{big_pid}/SmartShuffle").json()["ItemIds"]
+        check("smart shuffle leaves out the caller's disliked songs", set(without).isdisjoint(disliked_ids) and len(without) == len(big_ids) - 3, f"{len(without)} ids")
+    finally:
+        for track_id in disliked_ids:
+            alice.delete(f"/UserItems/{track_id}/Rating", params={"userId": alice.user_id})
+
     # Mark tracks as played: 40 just now, 10 a month ago, 30 by another user.
     played = order[:40]
     now = datetime.datetime.now(datetime.timezone.utc)
