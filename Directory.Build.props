@@ -2,7 +2,7 @@
   <PropertyGroup>
     <!-- Jellyfin server version this build targets. Override: -p:JellyfinVersion=12.5.0 (build.sh does this). -->
     <JellyfinVersion Condition="'$(JellyfinVersion)' == ''">12.4.0</JellyfinVersion>
-    <PluginVersion Condition="'$(PluginVersion)' == ''">1.4.6.0</PluginVersion>
+    <PluginVersion Condition="'$(PluginVersion)' == ''">1.4.6.1</PluginVersion>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>

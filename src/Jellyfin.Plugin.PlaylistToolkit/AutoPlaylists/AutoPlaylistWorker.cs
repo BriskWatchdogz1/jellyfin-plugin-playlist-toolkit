@@ -238,16 +238,20 @@ public sealed class AutoPlaylistWorker : IHostedService, IDisposable
         _logger.LogInformation(
             "User data of a song changed: user {User}, '{Song}', reason {Reason}, favourite {Favorite}, played {Played}, play count {Count}, rating {Rating}, request {Method} {Path}, client {Client}",
             e.UserId,
-            e.Item.Name,
+            ForLog(e.Item.Name),
             e.SaveReason,
             e.UserData.IsFavorite,
             e.UserData.Played,
             e.UserData.PlayCount,
             e.UserData.Rating,
-            request?.Method ?? "-",
-            request?.Path.Value ?? "-",
-            string.IsNullOrEmpty(client) ? "-" : client);
+            ForLog(request?.Method),
+            ForLog(request?.Path.Value),
+            ForLog(client));
     }
+
+    // Request values come from the caller: control characters (line breaks) would let a client forge log lines.
+    internal static string ForLog(string? value) =>
+        string.IsNullOrEmpty(value) ? "-" : string.Concat(value.Select(c => char.IsControl(c) ? ' ' : c));
 
     private void OnUserDataSaved(object? sender, UserDataSaveEventArgs e)
     {

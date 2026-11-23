@@ -1,6 +1,6 @@
 # Architecture
 
-State: plugin 1.4.6.0, Jellyfin 12.4.0.
+State: plugin 1.4.6.1, Jellyfin 12.4.0.
 
 ## Overview
 
