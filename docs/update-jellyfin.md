@@ -43,6 +43,9 @@ A plugin build targets one Jellyfin version (`JellyfinVersion` in `Directory.Bui
    python3 testserver/test_api.py
    ```
 
+   Also check that a heart still changes the automatic playlist "Favoriten" (checks AP3) and that the playlist is
+   still read-only (checks AP7): the plugin relies on Jellyfin's permission checks and on playlist visibility through shares.
+
 5. Check the web part in the browser on the test server (`http://localhost:18096`, demo playlists with
    `python3 testserver/seed_demo.py`), with the tab muted (the test tracks are beeps): table visible,
    sorting, filter, clicking a track plays it, smart shuffle (whole playlist in the queue, *Endless*

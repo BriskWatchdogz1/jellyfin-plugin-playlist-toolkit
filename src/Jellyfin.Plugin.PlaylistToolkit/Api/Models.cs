@@ -28,6 +28,9 @@ public class ClientConfigDto
 
     /// <summary>Gets or sets the maximum description length.</summary>
     public int MaxDescriptionLength { get; set; }
+
+    /// <summary>Gets or sets the articles that the client moves behind an artist name.</summary>
+    public IReadOnlyList<string> SortArticles { get; set; } = [];
 }
 
 /// <summary>A user that a playlist can be shared with.</summary>
@@ -92,6 +95,12 @@ public class PlaylistInfoDto
     /// <summary>Gets or sets a value indicating whether the caller may change sharing.</summary>
     public bool CanShare { get; set; }
 
+    /// <summary>Gets or sets the kind (Favorites, Dislikes) when this is an automatic playlist, else null.</summary>
+    public string? AutoKind { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the caller is the user an automatic playlist belongs to.</summary>
+    public bool IsAutoSubject { get; set; }
+
     /// <summary>Gets or sets the shares. Only filled for callers that may change sharing.</summary>
     public List<ShareDto> Shares { get; set; } = [];
 }
@@ -116,6 +125,12 @@ public class PlaylistSummaryDto
 
     /// <summary>Gets or sets a value indicating whether every user can see the playlist.</summary>
     public bool OpenAccess { get; set; }
+
+    /// <summary>Gets or sets the kind (Favorites, Dislikes) when this is an automatic playlist, else null.</summary>
+    public string? AutoKind { get; set; }
+
+    /// <summary>Gets or sets the name of the user an automatic playlist belongs to.</summary>
+    public string? AutoUserName { get; set; }
 
     /// <summary>Gets or sets the number of users the playlist is shared with.</summary>
     public int ShareCount { get; set; }
@@ -156,6 +171,12 @@ public class TrackRowDto
 
     /// <summary>Gets or sets a value indicating whether the item has its own primary image.</summary>
     public bool HasImage { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the calling user marked the track as favourite.</summary>
+    public bool IsFavorite { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the calling user disliked the track (Jellyfin's rating, <c>Likes == false</c>).</summary>
+    public bool IsDisliked { get; set; }
 }
 
 /// <summary>Track table content.</summary>
@@ -307,4 +328,76 @@ public class ImportResultDto
 
     /// <summary>Gets or sets the entries that could not be matched.</summary>
     public List<string> Unmatched { get; set; } = [];
+}
+
+/// <summary>The state of one automatic playlist of the caller.</summary>
+public class AutoPlaylistStateDto
+{
+    /// <summary>Gets or sets a value indicating whether the kind is switched on.</summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>Gets or sets the playlist id, null while it has not been created.</summary>
+    public Guid? PlaylistId { get; set; }
+
+    /// <summary>Gets or sets the number of entries.</summary>
+    public int ItemCount { get; set; }
+}
+
+/// <summary>The caller's automatic playlists.</summary>
+public class AutoPlaylistsDto
+{
+    /// <summary>Gets or sets the favourites playlist.</summary>
+    public AutoPlaylistStateDto Favorites { get; set; } = new();
+
+    /// <summary>Gets or sets the dislikes playlist.</summary>
+    public AutoPlaylistStateDto Dislikes { get; set; } = new();
+}
+
+
+/// <summary>A playlist the caller can add a track to or take it out of, with the state of one track.</summary>
+public class PlaylistTargetDto
+{
+    /// <summary>Gets or sets the playlist id.</summary>
+    public Guid Id { get; set; }
+
+    /// <summary>Gets or sets the name.</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Gets or sets the number of entries.</summary>
+    public int ItemCount { get; set; }
+
+    /// <summary>Gets or sets the owner's name (null when the caller owns it).</summary>
+    public string? OwnerName { get; set; }
+
+    /// <summary>Gets or sets a value indicating whether the track is already in the playlist.</summary>
+    public bool Contains { get; set; }
+
+    /// <summary>Gets or sets the album of the same song (same title and first artist) when the playlist holds it from another album.</summary>
+    public string? SimilarAlbum { get; set; }
+}
+
+/// <summary>Changes the playlists one track is in, all at once.</summary>
+public class MembershipRequest
+{
+    /// <summary>Gets or sets the track.</summary>
+    public Guid ItemId { get; set; }
+
+    /// <summary>Gets or sets the playlists the track is added to.</summary>
+    public List<Guid> Add { get; set; } = [];
+
+    /// <summary>Gets or sets the playlists the track is taken out of.</summary>
+    public List<Guid> Remove { get; set; } = [];
+}
+
+/// <summary>Result of a membership change.</summary>
+public class MembershipResultDto
+{
+    /// <summary>Gets or sets the playlists the track was added to.</summary>
+    public List<Guid> Added { get; set; } = [];
+
+    /// <summary>Gets or sets the playlists the track was taken out of.</summary>
+    public List<Guid> Removed { get; set; } = [];
+
+    /// <summary>Gets or sets the playlists that were refused or failed.</summary>
+    public List<Guid> Failed { get; set; } = [];
 }

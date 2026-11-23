@@ -8,6 +8,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Jellyfin.Data.Enums;
+using Jellyfin.Plugin.PlaylistToolkit.AutoPlaylists;
 using Jellyfin.Plugin.PlaylistToolkit.Configuration;
 using Jellyfin.Plugin.PlaylistToolkit.Services;
 using Jellyfin.Plugin.PlaylistToolkit.Web;
@@ -46,6 +47,9 @@ public class PlaylistToolkitController : ControllerBase
     private readonly PlaylistAccessService _access;
     private readonly PlaylistContentService _content;
     private readonly M3uService _m3u;
+    private readonly AutoPlaylistService _autoPlaylists;
+    private readonly AutoPlaylistWorker _autoWorker;
+    private readonly ILibraryManager _libraryManager;
     private readonly IPlaylistManager _playlistManager;
     private readonly IUserManager _userManager;
     private readonly IProviderManager _providerManager;
@@ -58,6 +62,9 @@ public class PlaylistToolkitController : ControllerBase
     /// <param name="access">Access service.</param>
     /// <param name="content">Content service.</param>
     /// <param name="m3u">M3U service.</param>
+    /// <param name="autoPlaylists">Automatic playlist service.</param>
+    /// <param name="autoWorker">Automatic playlist worker.</param>
+    /// <param name="libraryManager">Library manager.</param>
     /// <param name="playlistManager">Playlist manager.</param>
     /// <param name="userManager">User manager.</param>
     /// <param name="providerManager">Provider manager.</param>
@@ -67,6 +74,9 @@ public class PlaylistToolkitController : ControllerBase
         PlaylistAccessService access,
         PlaylistContentService content,
         M3uService m3u,
+        AutoPlaylistService autoPlaylists,
+        AutoPlaylistWorker autoWorker,
+        ILibraryManager libraryManager,
         IPlaylistManager playlistManager,
         IUserManager userManager,
         IProviderManager providerManager,
@@ -76,6 +86,9 @@ public class PlaylistToolkitController : ControllerBase
         _access = access;
         _content = content;
         _m3u = m3u;
+        _autoPlaylists = autoPlaylists;
+        _autoWorker = autoWorker;
+        _libraryManager = libraryManager;
         _playlistManager = playlistManager;
         _userManager = userManager;
         _providerManager = providerManager;
@@ -107,6 +120,12 @@ public class PlaylistToolkitController : ControllerBase
     {
         var config = Config;
         var caller = await _access.GetCaller(HttpContext).ConfigureAwait(false);
+        if (caller is not null && _autoPlaylists.IsMissingFor(caller.User.Id))
+        {
+            // A user created after the last run (or a playlist that was deleted): have it created in the background.
+            _autoWorker.Enqueue(caller.User.Id);
+        }
+
         return new ClientConfigDto
         {
             IsAdministrator = caller is not null && PlaylistAccessService.IsAdministrator(caller.User),
@@ -115,7 +134,8 @@ public class PlaylistToolkitController : ControllerBase
             EnableDuplicateWarning = config.EnableDuplicateWarning,
             MaxQueueSize = Math.Max(1, config.MaxQueueSize),
             MaxImageBytes = MaxImageBytes(config),
-            MaxDescriptionLength = Math.Max(0, config.MaxDescriptionLength)
+            MaxDescriptionLength = Math.Max(0, config.MaxDescriptionLength),
+            SortArticles = config.EnableArtistSortFix ? ArtistNames.ArticleRule.ParseArticles(config.SortArticles) : []
         };
     }
 
@@ -153,19 +173,23 @@ public class PlaylistToolkitController : ControllerBase
             return Forbid();
         }
 
+        var registry = Config.AutoPlaylists.ToList();
         return _access.GetAllPlaylists()
-            .Select(p => new PlaylistSummaryDto
+            .Select(p => (Playlist: p, Auto: registry.FirstOrDefault(e => e.PlaylistId.Equals(p.Id))))
+            .Select(x => new PlaylistSummaryDto
             {
-                Id = p.Id,
-                Name = p.Name ?? string.Empty,
-                MediaType = p.MediaType.ToString(),
-                OwnerUserId = p.OwnerUserId,
-                OwnerName = p.OwnerUserId == Guid.Empty ? null : _userManager.GetUserById(p.OwnerUserId)?.Username,
-                OpenAccess = p.OpenAccess,
-                ShareCount = p.Shares.Count,
-                ItemCount = p.LinkedChildren.Length
+                AutoKind = x.Auto?.Kind.ToString(),
+                AutoUserName = x.Auto is null ? null : _userManager.GetUserById(x.Auto.UserId)?.Username,
+                Id = x.Playlist.Id,
+                Name = x.Playlist.Name ?? string.Empty,
+                MediaType = x.Playlist.MediaType.ToString(),
+                OwnerUserId = x.Playlist.OwnerUserId,
+                OwnerName = x.Playlist.OwnerUserId == Guid.Empty ? null : _userManager.GetUserById(x.Playlist.OwnerUserId)?.Username,
+                OpenAccess = x.Playlist.OpenAccess,
+                ShareCount = x.Playlist.Shares.Count,
+                ItemCount = x.Playlist.LinkedChildren.Length
             })
-            .OrderBy(p => p.OwnerName, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(p => p.OwnerName ?? p.AutoUserName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(p => p.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
     }
@@ -290,6 +314,7 @@ public class PlaylistToolkitController : ControllerBase
         var playlist = access.Playlist;
         await _providerManager.SaveImage(playlist, buffer, mimeType, ImageType.Primary, null, CancellationToken.None).ConfigureAwait(false);
         await playlist.UpdateToRepositoryAsync(ItemUpdateType.ImageUpdate, CancellationToken.None).ConfigureAwait(false);
+        MarkAutoImage(playlist.Id, custom: true);
         return NoContent();
     }
 
@@ -313,6 +338,7 @@ public class PlaylistToolkitController : ControllerBase
         }
 
         await access.Playlist.DeleteImageAsync(ImageType.Primary, 0).ConfigureAwait(false);
+        MarkAutoImage(access.Playlist.Id, custom: false);
         return NoContent();
     }
 
@@ -372,6 +398,176 @@ public class PlaylistToolkitController : ControllerBase
         }
 
         return ToInfo(access);
+    }
+
+    /// <summary>
+    /// Gets the caller's automatic playlists: switched on, playlist id (null until created), number of entries.
+    /// </summary>
+    /// <returns>The state of both kinds.</returns>
+    [HttpGet("AutoPlaylists")]
+    public async Task<ActionResult<AutoPlaylistsDto>> GetAutoPlaylists()
+    {
+        var caller = await _access.GetCaller(HttpContext).ConfigureAwait(false);
+        if (caller is null)
+        {
+            return Forbid();
+        }
+
+        return ToAutoDto(caller.User.Id);
+    }
+
+    /// <summary>
+    /// Reconciles the caller's automatic playlists now, without the delay of the background worker.
+    /// </summary>
+    /// <returns>The state of both kinds.</returns>
+    [HttpPost("AutoPlaylists/Sync")]
+    public async Task<ActionResult<AutoPlaylistsDto>> SyncAutoPlaylists()
+    {
+        var caller = await _access.GetCaller(HttpContext).ConfigureAwait(false);
+        if (caller is null)
+        {
+            return Forbid();
+        }
+
+        await _autoPlaylists.ReconcileUserAsync(caller.User.Id, HttpContext.RequestAborted).ConfigureAwait(false);
+        return ToAutoDto(caller.User.Id);
+    }
+
+    /// <summary>
+    /// Lists the playlists the caller can edit (own and shared with the edit right, no automatic ones) with the
+    /// state of one track in each: already in it, or the same song from another album.
+    /// </summary>
+    /// <param name="itemId">The track.</param>
+    /// <returns>Playlists.</returns>
+    [HttpGet("Targets")]
+    public async Task<ActionResult<List<PlaylistTargetDto>>> GetTargets([FromQuery, Required] Guid itemId)
+    {
+        var caller = await _access.GetCaller(HttpContext).ConfigureAwait(false);
+        if (caller is null)
+        {
+            return Forbid();
+        }
+
+        var isVisible = PlaylistContentService.VisibilityCheck(caller.User);
+        var track = _libraryManager.GetItemById(itemId);
+        if (track is null || !isVisible(track))
+        {
+            return NotFound("Track not found");
+        }
+
+        var auto = Config.AutoPlaylists.Select(e => e.PlaylistId).ToHashSet();
+        var result = new List<PlaylistTargetDto>();
+        foreach (var playlist in _access.GetAllPlaylists())
+        {
+            if (!IsEditableTarget(playlist, caller.User.Id, auto))
+            {
+                continue;
+            }
+
+            var (contains, similar) = _content.Relation(playlist, caller.User, track);
+            result.Add(new PlaylistTargetDto
+            {
+                Id = playlist.Id,
+                Name = playlist.Name ?? string.Empty,
+                ItemCount = playlist.LinkedChildren.Length,
+                OwnerName = playlist.OwnerUserId.Equals(caller.User.Id) ? null : _userManager.GetUserById(playlist.OwnerUserId)?.Username,
+                Contains = contains,
+                SimilarAlbum = similar
+            });
+        }
+
+        return result.OrderBy(p => p.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+    }
+
+    /// <summary>
+    /// Adds a track to some playlists and takes it out of others in one call. Every playlist is checked for the
+    /// caller's right to edit it; a playlist that is refused is reported and the others are still handled.
+    /// </summary>
+    /// <param name="request">The changes.</param>
+    /// <returns>What was done.</returns>
+    [HttpPost("Membership")]
+    public async Task<ActionResult<MembershipResultDto>> ChangeMembership([FromBody, Required] MembershipRequest request)
+    {
+        var caller = await _access.GetCaller(HttpContext).ConfigureAwait(false);
+        if (caller is null)
+        {
+            return Forbid();
+        }
+
+        var track = _libraryManager.GetItemById(request.ItemId);
+        if (track is null || !PlaylistContentService.VisibilityCheck(caller.User)(track))
+        {
+            return NotFound("Track not found");
+        }
+
+        var auto = Config.AutoPlaylists.Select(e => e.PlaylistId).ToHashSet();
+        var result = new MembershipResultDto();
+        foreach (var id in request.Remove.Distinct())
+        {
+            var playlist = _libraryManager.GetItemById(id) as Playlist;
+            if (playlist is null || !IsEditableTarget(playlist, caller.User.Id, auto))
+            {
+                result.Failed.Add(id);
+                continue;
+            }
+
+            try
+            {
+                var entries = PlaylistContentService.EntryIdsOf(playlist, track.Id);
+                if (entries.Count > 0)
+                {
+                    await _content.RemoveItems(playlist, entries).ConfigureAwait(false);
+                }
+
+                result.Removed.Add(id);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Membership: removing a track from playlist {Playlist} failed", id);
+                result.Failed.Add(id);
+            }
+        }
+
+        foreach (var id in request.Add.Distinct().Where(i => !request.Remove.Contains(i)))
+        {
+            var playlist = _libraryManager.GetItemById(id) as Playlist;
+            if (playlist is null || !IsEditableTarget(playlist, caller.User.Id, auto))
+            {
+                result.Failed.Add(id);
+                continue;
+            }
+
+            try
+            {
+                if (PlaylistContentService.EntryIdsOf(playlist, track.Id).Count == 0)
+                {
+                    await _content.AddItems(playlist, caller.User, [track.Id]).ConfigureAwait(false);
+                }
+
+                result.Added.Add(id);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Membership: adding a track to playlist {Playlist} failed", id);
+                result.Failed.Add(id);
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Checks the rights an ordinary user has on a music playlist as a target: owner or editor, never an
+    /// automatic playlist. Administrators get no extra right here; this is the list of "their" playlists.
+    /// </summary>
+    private static bool IsEditableTarget(Playlist playlist, Guid userId, HashSet<Guid> automatic)
+    {
+        if (automatic.Contains(playlist.Id) || playlist.MediaType != MediaType.Audio)
+        {
+            return false;
+        }
+
+        return playlist.OwnerUserId.Equals(userId) || playlist.Shares.Any(s => s.CanEdit && s.UserId.Equals(userId));
     }
 
     /// <summary>
@@ -673,6 +869,23 @@ public class PlaylistToolkitController : ControllerBase
         return result;
     }
 
+    /// <summary>
+    /// Records that a person set (custom) or removed (not custom) the image of an automatic playlist, so the
+    /// reconcile leaves a set image alone and puts the fixed image back after a removal.
+    /// </summary>
+    private static void MarkAutoImage(Guid playlistId, bool custom)
+    {
+        var entry = AutoPlaylistEntry.FindByPlaylist(Config, playlistId);
+        if (entry is null)
+        {
+            return;
+        }
+
+        entry.CustomImage = custom;
+        entry.ImageChecksum = null;
+        Plugin.Instance?.SaveConfiguration();
+    }
+
     private static long MaxImageBytes(PluginConfiguration config)
     {
         return Math.Max(1, config.MaxImageSizeMb) * 1024L * 1024L;
@@ -717,6 +930,22 @@ public class PlaylistToolkitController : ControllerBase
             : (access, caller, null);
     }
 
+    private AutoPlaylistsDto ToAutoDto(Guid userId)
+    {
+        static AutoPlaylistStateDto Map(AutoPlaylistState state) => new()
+        {
+            Enabled = state.Enabled,
+            PlaylistId = state.PlaylistId,
+            ItemCount = state.ItemCount
+        };
+
+        return new AutoPlaylistsDto
+        {
+            Favorites = Map(_autoPlaylists.GetState(userId, AutoPlaylistKind.Favorites)),
+            Dislikes = Map(_autoPlaylists.GetState(userId, AutoPlaylistKind.Dislikes))
+        };
+    }
+
     private PlaylistInfoDto ToInfo(PlaylistAccess access)
     {
         var playlist = access.Playlist;
@@ -733,7 +962,9 @@ public class PlaylistToolkitController : ControllerBase
             IsOwner = access.IsOwner,
             CanEditItems = access.CanEditItems,
             CanManage = access.CanManage,
-            CanShare = access.CanShare
+            CanShare = access.CanShare,
+            AutoKind = access.AutoKind?.ToString(),
+            IsAutoSubject = access.IsAutoSubject
         };
 
         if (access.CanShare)

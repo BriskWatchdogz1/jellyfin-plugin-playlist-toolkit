@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using Jellyfin.Data;
 using Jellyfin.Database.Implementations.Entities;
 using Jellyfin.Database.Implementations.Enums;
+using Jellyfin.Plugin.PlaylistToolkit.AutoPlaylists;
 using Jellyfin.Data.Enums;
 using MediaBrowser.Controller.Dto;
 using MediaBrowser.Controller.Entities;
@@ -103,13 +104,40 @@ public class PlaylistAccessService
         var isEditor = playlist.Shares.Any(s => s.CanEdit && s.UserId.Equals(user.Id));
         var editorsMayManage = Plugin.Instance?.Configuration.EditorsCanEditDetails ?? false;
 
-        return new PlaylistAccess(
+        var access = new PlaylistAccess(
             playlist,
             isOwner,
             isAdmin,
             CanEditItems: isOwner || isEditor || isAdmin,
             CanManage: isOwner || isAdmin || (isEditor && editorsMayManage),
             CanShare: isOwner || isAdmin);
+
+        var config = Plugin.Instance?.Configuration;
+        var entry = config is null ? null : AutoPlaylistEntry.FindByPlaylist(config, playlist.Id);
+        return entry is null ? access : ApplyAutoRules(access, entry.Kind, entry.UserId.Equals(user.Id));
+    }
+
+    /// <summary>
+    /// Turns the rights on an automatic playlist into the read-only shape: nobody may add, remove, move or
+    /// share, administrators included. The user it belongs to and administrators may still change image and
+    /// description.
+    /// </summary>
+    /// <param name="access">Rights as for a normal playlist.</param>
+    /// <param name="kind">Kind of the automatic playlist.</param>
+    /// <param name="isSubject">The caller is the user the playlist belongs to.</param>
+    /// <returns>The adjusted rights.</returns>
+    public static PlaylistAccess ApplyAutoRules(PlaylistAccess access, AutoPlaylistKind kind, bool isSubject)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+        return access with
+        {
+            IsOwner = false,
+            CanEditItems = false,
+            CanShare = false,
+            CanManage = isSubject || access.IsAdmin,
+            AutoKind = kind,
+            IsAutoSubject = isSubject
+        };
     }
 }
 
@@ -129,4 +157,6 @@ public sealed record Caller(User User, string? DeviceId);
 /// <param name="CanEditItems">Caller may add, remove and move tracks (owner, share with edit right, or administrator).</param>
 /// <param name="CanManage">Caller may change image and description.</param>
 /// <param name="CanShare">Caller may change who the playlist is shared with.</param>
-public sealed record PlaylistAccess(Playlist Playlist, bool IsOwner, bool IsAdmin, bool CanEditItems, bool CanManage, bool CanShare);
+/// <param name="AutoKind">Kind when the playlist is an automatic one, else null.</param>
+/// <param name="IsAutoSubject">The caller is the user an automatic playlist belongs to.</param>
+public sealed record PlaylistAccess(Playlist Playlist, bool IsOwner, bool IsAdmin, bool CanEditItems, bool CanManage, bool CanShare, AutoPlaylistKind? AutoKind = null, bool IsAutoSubject = false);

@@ -62,6 +62,502 @@ def wait_until(predicate, timeout=30, step=0.5):
     return False
 
 
+# ------------------------------------------------------------------- automatic playlists
+def nodash(value):
+    return value.replace("-", "").lower()
+
+
+def set_heart(client, item_id, on=True):
+    path = f"/UserFavoriteItems/{item_id}"
+    return client.post(path) if on else client.delete(path)
+
+
+def set_dislike(client, item_id, on=True):
+    path = f"/UserItems/{item_id}/Rating"
+    return client.post(path, params={"likes": "false"}) if on else client.delete(path)
+
+
+def auto_state(client):
+    return client.get("/PlaylistToolkit/AutoPlaylists").json()
+
+
+def stock_playlists(client):
+    return client.get("/Items", params={"IncludeItemTypes": "Playlist", "Recursive": "true", "UserId": client.user_id}).json()["Items"]
+
+
+def playlist_ids(client, pid):
+    resp = client.get(f"/Playlists/{pid}/Items", params={"userId": client.user_id})
+    return [nodash(i["Id"]) for i in resp.json()["Items"]] if resp.status == 200 else None
+
+
+def auto_pid(client, kind):
+    value = auto_state(client)[kind].get("PlaylistId")
+    return nodash(value) if value else None
+
+
+def wait_items(client, kind, expected, timeout):
+    """Waits until the automatic playlist of a kind holds exactly the expected ids in that order."""
+    def done():
+        pid = auto_pid(client, kind)
+        return pid is not None and playlist_ids(client, pid) == [nodash(e) for e in expected]
+    return wait_until(done, timeout=timeout, step=0.3)
+
+
+def automatic_playlists(admin, alice, bob, dave, settings, small, bulk):
+    delay = settings.get("AutoPlaylistSyncDelaySeconds", 2)
+    wait = delay + 10
+    base = dict(EnableFavoritesPlaylist=True, EnableDislikesPlaylist=True, FavoritesPlaylistName="Favoriten",
+                DislikesPlaylistName="Dislikes", AutoPlaylistNewestFirst=True)
+    keys = list(base)
+
+    def configure(**changes):
+        # Merge into the live configuration: it carries the registry of the automatic playlists.
+        current = admin.get(f"/Plugins/{PLUGIN_ID}/Configuration").json()
+        resp = admin.post(f"/Plugins/{PLUGIN_ID}/Configuration", dict(current, **dict(base, **changes)))
+        assert resp.status in (200, 204), resp.text()
+
+    marked = []  # (client, item id, kind) to undo in the end
+
+    def heart(client, item_id):
+        marked.append((client, item_id, "heart"))
+        return set_heart(client, item_id)
+
+    def dislike(client, item_id):
+        marked.append((client, item_id, "dislike"))
+        return set_dislike(client, item_id)
+
+    s = [nodash(i["Id"]) for i in small[:6]]
+    d = [nodash(i["Id"]) for i in small[20:26]]
+    try:
+        # a clean start: no marks of earlier runs
+        for client in (alice, bob, dave):
+            for item in client.get("/Items", params={"Recursive": "true", "Filters": "IsFavorite", "UserId": client.user_id, "Limit": "5000"}).json()["Items"]:
+                set_heart(client, item["Id"], False)
+        configure(EnableFavoritesPlaylist=False, EnableDislikesPlaylist=False)
+
+        # AP1
+        wait_until(lambda: "PlaylistId" not in auto_state(alice)["Favorites"], timeout=wait, step=0.5)
+        st = auto_state(alice)
+        heart(alice, s[0])
+        time.sleep(delay + 3)
+        listed = admin.get("/PlaylistToolkit/Admin/Playlists").json()
+        check("AP1 both kinds off: nothing enabled, no id, a heart creates no playlist",
+              not st["Favorites"]["Enabled"] and not st["Dislikes"]["Enabled"] and "PlaylistId" not in st["Favorites"] and "PlaylistId" not in st["Dislikes"]
+              and not any(p.get("AutoKind") for p in listed), str(st))
+        set_heart(alice, s[0], False)
+
+        # AP2
+        configure()
+        resp = alice.post("/PlaylistToolkit/AutoPlaylists/Sync")
+        st = resp.json()
+        check("AP2 both on, no marks: both playlists exist from the start, empty",
+              resp.status == 200 and st["Favorites"]["Enabled"] and "PlaylistId" in st["Favorites"] and "PlaylistId" in st["Dislikes"]
+              and st["Favorites"]["ItemCount"] == 0 and st["Dislikes"]["ItemCount"] == 0, resp.text())
+        empty_pid = nodash(st["Favorites"]["PlaylistId"])
+        check("AP2 the empty 'Favoriten' is listed in the stock playlist list and shows an empty table",
+              any(nodash(p["Id"]) == empty_pid and p["Name"] == "Favoriten" for p in stock_playlists(alice))
+              and alice.get(f"/PlaylistToolkit/Playlists/{empty_pid}/Items").json()["Items"] == [])
+
+        # AP3
+        heart(alice, s[0])
+        ok = wait_items(alice, "Favorites", [s[0]], wait)
+        fav = auto_pid(alice, "Favorites")
+        names = [p["Name"] for p in stock_playlists(alice) if nodash(p["Id"]) == fav]
+        check("AP3 a heart creates 'Favoriten' in the stock playlist list with exactly that song", ok and names == ["Favoriten"], f"{fav} {names}")
+
+        # AP4
+        heart(alice, s[1])
+        ok2 = wait_items(alice, "Favorites", [s[1], s[0]], wait)
+        heart(alice, s[2])
+        ok3 = wait_items(alice, "Favorites", [s[2], s[1], s[0]], wait)
+        check("AP4 newest heart on top", ok2 and ok3)
+
+        # AP5
+        set_heart(alice, s[1], False)
+        check("AP5 removing a heart removes the song, order kept", wait_items(alice, "Favorites", [s[2], s[0]], wait))
+        heart(alice, s[1])
+        wait_items(alice, "Favorites", [s[1], s[2], s[0]], wait)
+
+        # AP6
+        dislike(alice, d[0])
+        ok = wait_items(alice, "Dislikes", [d[0]], wait)
+        dpid = auto_pid(alice, "Dislikes")
+        set_dislike(alice, d[0], False)
+        ok2 = wait_items(alice, "Dislikes", [], wait)
+        check("AP6 a dislike creates 'Dislikes'; clearing it keeps the empty playlist with the same id",
+              ok and ok2 and auto_pid(alice, "Dislikes") == dpid and dpid is not None, f"{dpid} {auto_pid(alice, 'Dislikes')}")
+        for x in d[:3]:
+            dislike(alice, x)
+        wait_items(alice, "Dislikes", [d[2], d[1], d[0]], wait)
+
+        # AP7
+        pid = fav
+        some = small[30]["Id"]
+        entries = alice.get(f"/Playlists/{pid}/Items", params={"userId": alice.user_id}).json()["Items"]
+        first_entry = entries[0]["PlaylistItemId"]
+        refused = {
+            "stock add": alice.post(f"/Playlists/{pid}/Items", params={"ids": some, "userId": alice.user_id}).status,
+            "stock remove": alice.delete(f"/Playlists/{pid}/Items", params={"entryIds": first_entry}).status,
+            "stock move": alice.post(f"/Playlists/{pid}/Items/{first_entry}/Move/1").status,
+            "stock rename": alice.post(f"/Playlists/{pid}", {"Name": "T-Renamed"}).status,
+            "stock delete": alice.delete(f"/Items/{pid}").status,
+        }
+        for who, client in (("user", alice), ("admin", admin)):
+            refused[f"plugin add {who}"] = client.post(f"/PlaylistToolkit/Playlists/{pid}/Items", {"Ids": [some]}).status
+            refused[f"plugin remove {who}"] = client.delete(f"/PlaylistToolkit/Playlists/{pid}/Items", params={"entryIds": first_entry}).status
+            refused[f"plugin move {who}"] = client.post(f"/PlaylistToolkit/Playlists/{pid}/Items/{first_entry}/Move/1").status
+            refused[f"plugin share {who}"] = client.post(f"/PlaylistToolkit/Playlists/{pid}/Sharing", {"OpenAccess": True}).status
+            refused[f"plugin import {who}"] = client.post("/PlaylistToolkit/Import", {"PlaylistId": pid, "Content": "#EXTM3U\n"}).status
+        share = alice.get(f"/Playlists/{pid}/Users/{alice.user_id}")
+        check("AP7 automatic playlist is read-only on the stock API and the plugin API (also for the administrator)",
+              all(v == 403 for k, v in refused.items() if k != 'stock delete') and refused['stock delete'] in (401, 403, 404) and playlist_ids(alice, pid) == [s[1], s[2], s[0]]
+              and share.status == 200 and share.json()["CanEdit"] is False, str(refused))
+
+        # AP8
+        check("AP8 other users do not see it", all(nodash(p["Id"]) != pid for p in stock_playlists(bob))
+              and bob.get(f"/PlaylistToolkit/Playlists/{pid}").status == 404)
+        listed = admin.get("/PlaylistToolkit/Admin/Playlists").json()
+        mine = [p for p in listed if nodash(p["Id"]) == pid]
+        check("AP8 administrator: stock 404, plugin admin list shows it with kind and user",
+              admin.get(f"/Playlists/{pid}").status == 404 and len(mine) == 1 and mine[0]["AutoKind"] == "Favorites"
+              and mine[0]["AutoUserName"] == "alice", str(mine))
+
+        # AP9
+        info = alice.get(f"/PlaylistToolkit/Playlists/{pid}").json()
+        check("AP9 rights of the user it belongs to",
+              info["AutoKind"] == "Favorites" and info["IsAutoSubject"] is True and info["CanEditItems"] is False
+              and info["CanShare"] is False and info["CanManage"] is True and info["IsOwner"] is False, str(info))
+        ainfo = admin.get(f"/PlaylistToolkit/Playlists/{pid}").json()
+        check("AP9 administrator view is read-only too", ainfo["AutoKind"] == "Favorites" and ainfo["IsAutoSubject"] is False
+              and not ainfo["CanEditItems"] and not ainfo["CanShare"] and ainfo["CanManage"])
+
+        # AP10
+        heart(bob, s[0])
+        wait_items(bob, "Favorites", [s[0]], wait)
+        bpid = auto_pid(bob, "Favorites")
+        check("AP10 another user gets an own playlist; the first user's is unchanged",
+              bpid and bpid != pid and playlist_ids(alice, pid) == [s[1], s[2], s[0]])
+
+        # AP11
+        album_id = alice.get(f"/Items/{small[0]['Id']}", params={"UserId": alice.user_id}).json()["AlbumId"]
+        set_heart(alice, album_id)
+        marked.append((alice, album_id, "heart"))
+        time.sleep(delay + 4)
+        unchanged = playlist_ids(alice, pid) == [s[1], s[2], s[0]]
+        resp = alice.post(f"/UserItems/{s[3]}/UserData", {"IsFavorite": True})
+        marked.append((alice, s[3], "heart"))
+        via_userdata = resp.status in (200, 204) and wait_items(alice, "Favorites", [s[3], s[1], s[2], s[0]], wait)
+        check("AP11 a favourite album changes nothing; a heart set through the user data endpoint appears",
+              unchanged and via_userdata, f"unchanged={unchanged} userdata={resp.status}")
+        set_heart(alice, album_id, False)
+
+        # AP12
+        a = alice.post("/PlaylistToolkit/AutoPlaylists/Sync").json()
+        b = alice.post("/PlaylistToolkit/AutoPlaylists/Sync").json()
+        rows = playlist_ids(alice, pid)
+        check("AP12 sync twice: same id, same entries, no duplicates",
+              a == b and nodash(a["Favorites"]["PlaylistId"]) == pid and rows == [s[3], s[1], s[2], s[0]] and len(set(rows)) == len(rows))
+
+        # AP13
+        thirty = [nodash(i["Id"]) for i in bulk[:30]]
+        for x in thirty:
+            heart(bob, x)
+        ok = wait_until(lambda: sorted(playlist_ids(bob, bpid) or []) == sorted(thirty + [s[0]]), timeout=wait, step=0.5)
+        rows = playlist_ids(bob, bpid)
+        check("AP13 30 hearts in a row: all present exactly once", ok and len(rows) == len(set(rows)) == 31, str(len(rows or [])))
+
+        # AP21
+        t0 = time.time()
+        heart(bob, nodash(bulk[40]["Id"]))
+        ok = wait_until(lambda: nodash(bulk[40]["Id"]) in (playlist_ids(bob, bpid) or []), timeout=wait, step=0.1)
+        took = time.time() - t0
+        check("AP21 time from heart to playlist entry is below the delay plus 5 s", ok and took < delay + 5, f"{took:.1f} s")
+
+        # AP18
+        resp = alice.get("/Items", params={"ParentId": pid, "SortBy": "Random", "UserId": alice.user_id, "Limit": "50"})
+        got = sorted(nodash(i["Id"]) for i in resp.json()["Items"])
+        check("AP18 stock shuffle query on the playlist returns the favourites", resp.status == 200 and got == sorted([s[3], s[1], s[2], s[0]]), str(got))
+
+        # AP17
+        resp = alice.get(f"/PlaylistToolkit/Playlists/{dpid}/SmartShuffle")
+        got = sorted(nodash(x) for x in resp.json()["ItemIds"]) if resp.status == 200 else []
+        check("AP17 smart shuffle on 'Dislikes' returns its 3 songs", got == sorted(d[:3]), str(resp.text()[:200]))
+
+        # AP15
+        configure(FavoritesPlaylistName="T-Favs")
+        ok = wait_until(lambda: [p["Name"] for p in stock_playlists(alice) if nodash(p["Id"]) == pid] == ["T-Favs"], timeout=wait, step=0.5)
+        check("AP15 a changed name renames the existing playlist (same id)", ok and auto_pid(alice, "Favorites") == pid)
+        configure()
+        wait_until(lambda: [p["Name"] for p in stock_playlists(alice) if nodash(p["Id"]) == pid] == ["Favoriten"], timeout=wait, step=0.5)
+
+        # AP16
+        configure(AutoPlaylistNewestFirst=False)
+        heart(alice, s[4])
+        ok = wait_items(alice, "Favorites", [s[3], s[1], s[2], s[0], s[4]], wait)
+        check("AP16 newest-first off: a new heart is the last entry", ok)
+        configure()
+
+        # AP14
+        before = playlist_ids(alice, pid)
+        resp = admin.delete(f"/Items/{pid}")
+        still = playlist_ids(alice, pid) == before
+        check("AP14 the stock delete of an administrator does not reach it (the administrator cannot see it)", resp.status in (401, 403, 404) and still, f"delete={resp.status}")
+        # A lost registry entry is healed by adoption: same playlist, no second one.
+        current = admin.get(f"/Plugins/{PLUGIN_ID}/Configuration").json()
+        admin.post(f"/Plugins/{PLUGIN_ID}/Configuration", dict(current, AutoPlaylists=[]))
+        time.sleep(delay + 4)
+        alice.post("/PlaylistToolkit/AutoPlaylists/Sync")
+        mine = [p for p in stock_playlists(alice) if p["Name"] == "Favoriten"]
+        check("AP14 an emptied registry is healed by adoption: same playlist id, no second playlist",
+              auto_pid(alice, "Favorites") == pid and len(mine) == 1 and playlist_ids(alice, pid) == before, f"{auto_pid(alice, 'Favorites')} {len(mine)}")
+
+        # AP19
+        tasks = admin.get("/ScheduledTasks").json()
+        task = next((t for t in tasks if t["Key"] == "PlaylistToolkitAutoPlaylists"), None)
+        done = False
+        if task:
+            admin.post(f"/ScheduledTasks/Running/{task['Id']}")
+            def finished():
+                t = next(t for t in admin.get("/ScheduledTasks").json() if t["Key"] == "PlaylistToolkitAutoPlaylists")
+                return t["State"] == "Idle" and (t.get("LastExecutionResult") or {}).get("Status") == "Completed"
+            done = wait_until(finished, timeout=60, step=0.5)
+        check("AP19 scheduled task exists, runs and completes", task is not None and done)
+
+        # AP20
+        name = "pt-temp-auto"
+        created = admin.post("/Users/New", {"Name": name, "Password": jf.new_password()})
+        temp_pid = None
+        if created.status == 200:
+            temp_id = created.json()["Id"]
+            # no known password for the new user: use the user data endpoint of the administrator? Not possible, so set a password first.
+            password = jf.new_password()
+            admin.post(f"/Users/{temp_id}/Password", {"NewPw": password})
+            temp = jf.Client(name)
+            auth = temp.post("/Users/AuthenticateByName", {"Username": name, "Pw": password})
+            if auth.status == 200:
+                temp.token = auth.json()["AccessToken"]
+                temp.user_id = auth.json()["User"]["Id"]
+                temp.get("/PlaylistToolkit/Config")
+                both = wait_until(lambda: "PlaylistId" in auto_state(temp)["Favorites"] and "PlaylistId" in auto_state(temp)["Dislikes"], timeout=wait, step=0.5)
+                check("AP26 a new user gets both (empty) playlists after the first request of the web client", both, str(auto_state(temp)))
+                set_heart(temp, s[0])
+                temp.post("/PlaylistToolkit/AutoPlaylists/Sync")
+                temp_pid = auto_pid(temp, "Favorites")
+            admin.delete(f"/Users/{temp_id}")
+        if temp_pid:
+            task = next(t for t in admin.get("/ScheduledTasks").json() if t["Key"] == "PlaylistToolkitAutoPlaylists")
+            admin.post(f"/ScheduledTasks/Running/{task['Id']}")
+            time.sleep(3)
+            wait_until(lambda: all(nodash(p["Id"]) != temp_pid for p in admin.get("/PlaylistToolkit/Admin/Playlists").json()), timeout=60, step=1)
+        gone = temp_pid is not None and all(nodash(p["Id"]) != temp_pid for p in admin.get("/PlaylistToolkit/Admin/Playlists").json())
+        check("AP20 the automatic playlist of a deleted user is removed by the task", gone, str(temp_pid))
+
+        # AP23 fixed images
+        def primary(client, pid_):
+            item = client.get(f"/Items/{pid_}", params={"UserId": client.user_id}).json()
+            if "Primary" not in item.get("ImageTags", {}):
+                return None
+            img = client.get(f"/Items/{pid_}/Images/Primary")
+            return img.body if img.status == 200 else None
+
+        ok = wait_until(lambda: primary(alice, pid) is not None, timeout=wait + 5, step=0.5)
+        fav_img = primary(alice, pid)
+        check("AP23 'Favoriten' has the fixed image (PNG, 800x800)", ok and fav_img[:8] == b"\x89PNG\r\n\x1a\n" and fav_img[16:24] == bytes.fromhex("00000320") + bytes.fromhex("00000320"), str(len(fav_img or b"")))
+        ok = wait_until(lambda: primary(alice, dpid) is not None, timeout=wait + 5, step=0.5)
+        dis_img = primary(alice, dpid)
+        check("AP23 'Dislikes' has its own fixed image, different from 'Favoriten'", ok and dis_img[:8] == b"\x89PNG\r\n\x1a\n" and dis_img != fav_img, str(len(dis_img or b"")))
+
+        # AP24 a custom image stays
+        custom = make_image("jpg", 128, "blue")
+        resp = alice.request("POST", f"/PlaylistToolkit/Playlists/{pid}/Image", raw=custom, content_type="image/jpeg")
+        alice.post("/PlaylistToolkit/AutoPlaylists/Sync")
+        heart(alice, s[5])
+        wait_items(alice, "Favorites", [s[5], s[3], s[1], s[2], s[0], s[4]], wait)
+        time.sleep(delay + 3)
+        alice.post("/PlaylistToolkit/AutoPlaylists/Sync")
+        task = next((t for t in admin.get("/ScheduledTasks").json() if t["Key"] == "PlaylistToolkitAutoPlaylists"), None)
+        admin.post(f"/ScheduledTasks/Running/{task['Id']}")
+        time.sleep(delay + 4)
+        kept = primary(alice, pid)
+        check("AP24 an image set by the user stays after sync, new heart and the daily task", resp.status == 204 and kept is not None and kept[:3] == b"\xff\xd8\xff" and kept != fav_img, f"{resp.status} {len(kept or b'')}")
+        # AP25 removing it brings the fixed image back
+        alice.delete(f"/PlaylistToolkit/Playlists/{pid}/Image")
+        alice.post("/PlaylistToolkit/AutoPlaylists/Sync")
+        ok = wait_until(lambda: primary(alice, pid) == fav_img, timeout=wait + 10, step=0.5)
+        check("AP25 after removing the custom image the fixed image comes back", ok)
+        set_heart(alice, s[5], False)
+
+        # AP22
+        configure(EnableDislikesPlaylist=False)
+        ok = wait_until(lambda: "PlaylistId" not in auto_state(alice)["Dislikes"], timeout=wait, step=0.5)
+        # every user's playlist goes in one run; wait for the last one before looking at the list
+        wait_until(lambda: not any(p.get("AutoKind") == "Dislikes" for p in admin.get("/PlaylistToolkit/Admin/Playlists").json()), timeout=wait, step=0.5)
+        listed = admin.get("/PlaylistToolkit/Admin/Playlists").json()
+        check("AP22 'Dislikes' switched off: its playlists are gone, 'Favoriten' is untouched",
+              ok and not any(p.get("AutoKind") == "Dislikes" for p in listed) and auto_pid(alice, "Favorites") == pid
+              and any(p.get("AutoKind") == "Favorites" for p in listed))
+        configure()
+    finally:
+        for client, item_id, kind in marked:
+            (set_heart if kind == "heart" else set_dislike)(client, item_id, False)
+        current = admin.get(f"/Plugins/{PLUGIN_ID}/Configuration").json()
+        admin.post(f"/Plugins/{PLUGIN_ID}/Configuration", dict(current, **{k: settings[k] for k in keys}))
+        time.sleep(delay + 3)
+
+
+def membership(admin, alice, bob, small):
+    """TM1 to TM8: rows carry the heart; the targets list and the one-call membership change."""
+    ids = [i["Id"] for i in small]
+    a = create_playlist(alice, "T-Mem-A", ids[:3])
+    b = create_playlist(alice, "T-Mem-B", ids[3:5])
+    bobs = create_playlist(bob, "T-Mem-Bob", ids[:2])
+    listen = create_playlist(bob, "T-Mem-Listen", ids[:2])
+    editable = create_playlist(bob, "T-Mem-Edit", ids[:2])
+    alice_id = alice.user_id
+    bob.post(f"/PlaylistToolkit/Playlists/{listen}/Sharing", {"Shares": [{"UserId": alice_id, "CanEdit": False}]})
+    bob.post(f"/PlaylistToolkit/Playlists/{editable}/Sharing", {"Shares": [{"UserId": alice_id, "CanEdit": True}]})
+    track = ids[0]
+    try:
+        for item in alice.get("/Items", params={"Recursive": "true", "Filters": "IsFavorite", "UserId": alice.user_id, "Limit": "5000"}).json()["Items"]:
+            set_heart(alice, item["Id"], False)
+        set_heart(alice, track)
+        rows = alice.get(f"/PlaylistToolkit/Playlists/{a}/Items").json()["Items"]
+        by = {nodash(r["Id"]): r["IsFavorite"] for r in rows}
+        check("TM1 table rows carry the caller's heart", by[nodash(ids[0])] is True and by[nodash(ids[1])] is False, str(by))
+        set_dislike(alice, ids[1])
+        rows = alice.get(f"/PlaylistToolkit/Playlists/{a}/Items").json()["Items"]
+        by = {nodash(r["Id"]): (r["IsFavorite"], r["IsDisliked"]) for r in rows}
+        check("TM1 table rows carry the caller's dislike (and only that user's)", by[nodash(ids[1])] == (False, True) and by[nodash(ids[0])] == (True, False)
+              and not any(r["IsDisliked"] for r in bob.get(f"/PlaylistToolkit/Playlists/{bobs}/Items").json()["Items"]), str(by))
+        set_dislike(alice, ids[1], False)
+        rows_bob = bob.get(f"/PlaylistToolkit/Playlists/{bobs}/Items").json()["Items"]
+        check("TM1 the heart is the caller's own: bob's rows show none", not any(r["IsFavorite"] for r in rows_bob))
+
+        targets = alice.get("/PlaylistToolkit/Targets", params={"itemId": track}).json()
+        names = {t["Name"]: t for t in targets}
+        check("TM2 targets: own playlists and ones shared with edit right; no foreign, listen-only or automatic ones",
+              "T-Mem-A" in names and "T-Mem-B" in names and "T-Mem-Edit" in names and "T-Mem-Bob" not in names
+              and "T-Mem-Listen" not in names and "Favoriten" not in names and "Dislikes" not in names, str(sorted(names)))
+        check("TM2 targets say where the track already is", names["T-Mem-A"]["Contains"] is True and names["T-Mem-B"]["Contains"] is False
+              and names["T-Mem-Edit"]["Contains"] is True and names["T-Mem-Edit"]["OwnerName"] == "bob")
+        check("TM2 targets of an unknown track: 404", alice.get("/PlaylistToolkit/Targets", params={"itemId": "00000000000000000000000000000001"}).status == 404)
+
+        resp = alice.post("/PlaylistToolkit/Membership", {"ItemId": track, "Add": [b, bobs, listen], "Remove": [a]})
+        res = resp.json()
+        check("TM3 one call adds and removes; playlists without edit right are reported and left alone",
+              resp.status == 200 and [nodash(x) for x in res["Added"]] == [nodash(b)] and [nodash(x) for x in res["Removed"]] == [nodash(a)]
+              and sorted(nodash(x) for x in res["Failed"]) == sorted([nodash(bobs), nodash(listen)]), resp.text())
+        check("TM3 the playlists changed as asked",
+              nodash(track) in playlist_ids(alice, b) and nodash(track) not in playlist_ids(alice, a)
+              and nodash(track) in playlist_ids(bob, bobs) and nodash(track) in playlist_ids(bob, listen))
+        # nothing happens twice
+        res = alice.post("/PlaylistToolkit/Membership", {"ItemId": track, "Add": [b], "Remove": []}).json()
+        check("TM4 adding where the track already is adds no second entry", playlist_ids(alice, b).count(nodash(track)) == 1 and res["Failed"] == [])
+        # automatic playlist and a shared one with edit right
+        alice.post("/PlaylistToolkit/AutoPlaylists/Sync")
+        fav = auto_pid(alice, "Favorites")
+        res = alice.post("/PlaylistToolkit/Membership", {"ItemId": track, "Add": [fav], "Remove": [fav]}).json()
+        res2 = alice.post("/PlaylistToolkit/Membership", {"ItemId": ids[5], "Add": [editable], "Remove": []}).json()
+        check("TM5 an automatic playlist is never changed; a playlist shared with edit right is",
+              nodash(fav) in [nodash(x) for x in res["Failed"]] and nodash(ids[5]) in playlist_ids(bob, editable) and res2["Failed"] == [])
+        res = alice.post("/PlaylistToolkit/Membership", {"ItemId": track, "Add": [], "Remove": [editable, a]}).json()
+        check("TM6 removing works in a shared playlist; where the track is not it does no harm",
+              res["Failed"] == [] and nodash(track) not in playlist_ids(bob, editable) and len(playlist_ids(bob, editable)) == 2 and len(playlist_ids(alice, a)) == 2)
+        check("TM7 the membership call needs a login and a known track",
+              jf.Client().post("/PlaylistToolkit/Membership", {"ItemId": track}).status == 401
+              and alice.post("/PlaylistToolkit/Membership", {"ItemId": "00000000000000000000000000000001"}).status == 404)
+    finally:
+        set_heart(alice, track, False)
+        for client, pl in ((alice, a), (alice, b), (bob, bobs), (bob, listen), (bob, editable)):
+            client.delete(f"/Items/{pl}")
+
+
+def artist_sorting(admin, alice):
+    """AS1 to AS4: artists with a leading article sort without it; look-alikes stay."""
+    cfg = alice.get("/PlaylistToolkit/Config").json()
+    check("AS1 the client gets the list of articles", cfg.get("SortArticles") == ["The", "Die"], str(cfg.get("SortArticles")))
+    def sort_names():
+        items = alice.get("/Artists", params={"UserId": alice.user_id, "SortBy": "SortName", "Fields": "SortName", "Limit": "1000"}).json()["Items"]
+        return {i["Name"]: i["SortName"] for i in items}, [i["Name"] for i in items]
+    names, order = sort_names()
+    check("AS2 'Die' is sorted without the article, 'The' too",
+          names.get("Die Testband") == "testband" and names.get("The Test Band") == "test band", str({k: names.get(k) for k in ("Die Testband", "The Test Band")}))
+    check("AS3 'Diesel', 'Theory' and a bare 'The' are left alone",
+          names.get("Diesel Test") == "diesel test" and names.get("Theory Test") == "theory test" and names.get("The") == "the", str({k: names.get(k) for k in ("Diesel Test", "Theory Test", "The")}))
+    check("AS4 the artist list is ordered by the sort name", order.index("The Test Band") < order.index("Die Testband") < order.index("Theory Test"))
+    tasks = admin.get("/ScheduledTasks").json()
+    task = next((t for t in tasks if t["Key"] == "PlaylistToolkitArtistSort"), None)
+    ran = False
+    if task:
+        admin.post(f"/ScheduledTasks/Running/{task['Id']}")
+        ran = wait_until(lambda: next(t for t in admin.get("/ScheduledTasks").json() if t["Key"] == "PlaylistToolkitArtistSort")["State"] == "Idle", timeout=60, step=0.5)
+    check("AS5 the scheduled task exists and runs", task is not None and ran and sort_names()[0].get("Die Testband") == "testband")
+
+
+def marks_during_playback(alice, small):
+    """PB1: a heart or dislike set while the song plays is not wiped by the playback reports (Jellyfin 12.4 does that)."""
+    def marks(i):
+        d = alice.get(f"/Items/{i}", params={"UserId": alice.user_id}).json()["UserData"]
+        return d.get("IsFavorite"), d.get("Likes")
+    def play(i, act):
+        alice.post("/Sessions/Playing", {"ItemId": i, "PositionTicks": 0, "CanSeek": True, "PlayMethod": "DirectPlay"})
+        act()
+        time.sleep(0.4)
+        for pos in (10000000, 20000000):
+            alice.post("/Sessions/Playing/Progress", {"ItemId": i, "PositionTicks": pos, "IsPaused": False, "PlayMethod": "DirectPlay"})
+            time.sleep(0.5)
+        alice.post("/Sessions/Playing/Stopped", {"ItemId": i, "PositionTicks": 30000000})
+        time.sleep(0.8)
+    heart_id, dis_id = small[10]["Id"], small[11]["Id"]
+    try:
+        play(heart_id, lambda: set_heart(alice, heart_id))
+        play(dis_id, lambda: set_dislike(alice, dis_id))
+        check("PB1 a heart and a dislike set while the song plays survive progress and stop reports", marks(heart_id)[0] is True and marks(dis_id)[1] is False,
+              f"{marks(heart_id)} {marks(dis_id)}")
+        set_heart(alice, heart_id, False)
+        alice.post("/Sessions/Playing", {"ItemId": heart_id, "PositionTicks": 0, "CanSeek": True, "PlayMethod": "DirectPlay"})
+        alice.post("/Sessions/Playing/Stopped", {"ItemId": heart_id, "PositionTicks": 30000000})
+        time.sleep(0.8)
+        check("PB2 taking a heart back explicitly sticks (the guard does not bring it back)", marks(heart_id)[0] is False)
+    finally:
+        for i in (heart_id, dis_id):
+            set_heart(alice, i, False)
+            set_dislike(alice, i, False)
+
+
+def coexistence(admin, alice, anon, settings, small):
+    """CX1 to CX3: needs the Dislike plugin next to this one (DISLIKE_BUILD=... ./testserver/deploy.sh)."""
+    present = alice.get("/Dislike/Config").status == 200
+    if not present:
+        for name in ("CX1", "CX2", "CX3"):
+            print(f"SKIP  {name} (Dislike plugin not installed)")
+        return
+    delay = settings.get("AutoPlaylistSyncDelaySeconds", 2)
+    wait = delay + 10
+    index = anon.get("/web/index.html").text()
+    check("CX3 index.html carries both script tags and both config routes answer",
+          "data-playlisttoolkit" in index and "data-dislike" in index
+          and alice.get("/PlaylistToolkit/Config").status == 200 and alice.get("/Dislike/Config").status == 200)
+    song = nodash(small[45]["Id"])
+    current = admin.get(f"/Plugins/{PLUGIN_ID}/Configuration").json()
+    admin.post(f"/Plugins/{PLUGIN_ID}/Configuration", dict(current, EnableFavoritesPlaylist=True, EnableDislikesPlaylist=True))
+    try:
+        set_heart(alice, song)
+        in_fav = wait_items(alice, "Favorites", [song], wait)
+        set_dislike(alice, song)
+        left = wait_until(lambda: playlist_ids(alice, auto_pid(alice, "Favorites")) == [], timeout=wait, step=0.3)
+        entered = wait_items(alice, "Dislikes", [song], wait)
+        set_heart(alice, song)
+        back = wait_items(alice, "Favorites", [song], wait)
+        gone = wait_items(alice, "Dislikes", [], wait)
+        check("CX1 with the exclusion: a dislike moves the song from 'Favoriten' to 'Dislikes', a heart moves it back",
+              in_fav and left and entered and back and gone, f"{in_fav} {left} {entered} {back} {gone}")
+    finally:
+        set_heart(alice, song, False)
+        set_dislike(alice, song, False)
+    print("SKIP  CX2 (needs the Dislike plugin with review lists, part B; not implemented)")
+
+
 def main():
     alice, bob, carol, dave, admin = (jf.login(n) for n in ("alice", "bob", "carol", "dave", "testadmin"))
     anon = jf.Client()
@@ -540,6 +1036,11 @@ def main():
           and bob.post(f"/PlaylistToolkit/Playlists/{pid}/Sharing", {"Shares": []}).status == 403
           and bob.post(f"/PlaylistToolkit/Playlists/{pid}/Items", {"Ids": [small[40]["Id"]]}).status == 403)
 
+    artist_sorting(admin, alice)
+    marks_during_playback(alice, small)
+    membership(admin, alice, bob, small)
+    automatic_playlists(admin, alice, bob, dave, settings, small, bulk)
+    coexistence(admin, alice, anon, settings, small)
     delete_test_playlists([alice, bob, carol, dave, admin])
     failed = [r for r in RESULTS if not r[1]]
     print(f"\n{len(RESULTS) - len(failed)} of {len(RESULTS)} checks passed")

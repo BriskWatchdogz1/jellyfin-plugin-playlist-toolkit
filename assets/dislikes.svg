@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="800" viewBox="0 0 800 800">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6b6f85"/>
+      <stop offset="0.5" stop-color="#4a3f6b"/>
+      <stop offset="1" stop-color="#1f1a33"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="800" fill="url(#bg)"/>
+  <!-- thumb down: the thumbs-up shape rotated by 180 degrees around the centre -->
+  <g transform="rotate(180 400 400)" fill="#ffffff">
+    <rect x="190" y="360" width="110" height="250" rx="18"/>
+    <path d="M330 372 L400 200 C 405 188, 418 180, 432 183 C 462 190, 476 215, 470 245 L 452 330 L 580 330 C 610 330, 628 355, 622 382 L 590 540 C 584 570, 560 590, 530 590 L 330 590 Z"/>
+  </g>
+</svg>

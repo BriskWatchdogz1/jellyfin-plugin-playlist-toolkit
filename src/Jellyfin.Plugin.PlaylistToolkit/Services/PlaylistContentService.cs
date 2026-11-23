@@ -22,6 +22,7 @@ public class PlaylistContentService
     private readonly ILibraryManager _libraryManager;
     private readonly IPlaylistManager _playlistManager;
     private readonly IUserDataManager _userDataManager;
+    private readonly IContainerDislikeReader _containerDislikes;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="PlaylistContentService"/> class.
@@ -29,8 +30,10 @@ public class PlaylistContentService
     /// <param name="libraryManager">Library manager.</param>
     /// <param name="playlistManager">Playlist manager.</param>
     /// <param name="userDataManager">User data manager.</param>
-    public PlaylistContentService(ILibraryManager libraryManager, IPlaylistManager playlistManager, IUserDataManager userDataManager)
+    /// <param name="containerDislikes">Reader for the albums and artists a user disliked.</param>
+    public PlaylistContentService(ILibraryManager libraryManager, IPlaylistManager playlistManager, IUserDataManager userDataManager, IContainerDislikeReader containerDislikes)
     {
+        _containerDislikes = containerDislikes;
         _libraryManager = libraryManager;
         _playlistManager = playlistManager;
         _userDataManager = userDataManager;
@@ -89,6 +92,7 @@ public class PlaylistContentService
     public TrackListDto GetRows(Playlist playlist, User user)
     {
         var entries = GetVisibleEntries(playlist, user);
+        var marks = _userDataManager.GetUserDataBatch(entries.Select(e => e.Item2).ToList(), user);
         var result = new TrackListDto { TotalRecordCount = entries.Count };
         result.Items.Capacity = entries.Count;
 
@@ -106,7 +110,9 @@ public class PlaylistContentService
                 Album = item.Album,
                 AlbumId = item is Audio ? AlbumIdOf(item) : null,
                 RunTimeTicks = item.RunTimeTicks,
-                HasImage = item.HasImage(ImageType.Primary, 0)
+                HasImage = item.HasImage(ImageType.Primary, 0),
+                IsFavorite = marks.TryGetValue(item.Id, out var mark) && mark.IsFavorite,
+                IsDisliked = mark is not null && mark.Likes == false
             });
             result.TotalRunTimeTicks += item.RunTimeTicks ?? 0;
         }
@@ -180,6 +186,44 @@ public class PlaylistContentService
     }
 
     /// <summary>
+    /// Describes how a track relates to a playlist: already in it, or the same song from another album.
+    /// </summary>
+    /// <param name="playlist">Playlist.</param>
+    /// <param name="user">User.</param>
+    /// <param name="track">The track.</param>
+    /// <returns>Whether the track is in the playlist, and the album of a same-named song otherwise.</returns>
+    public (bool Contains, string? SimilarAlbum) Relation(Playlist playlist, User user, BaseItem track)
+    {
+        if (playlist.LinkedChildren.Any(c => c.ItemId.HasValue && c.ItemId.Value.Equals(track.Id)))
+        {
+            return (true, null);
+        }
+
+        var key = TextKeys.SongKey(track);
+        if (key is null)
+        {
+            return (false, null);
+        }
+
+        var match = GetVisibleEntries(playlist, user).Select(e => e.Item2).FirstOrDefault(i => TextKeys.SongKey(i) == key);
+        return (false, match is null ? null : (match.Album ?? string.Empty));
+    }
+
+    /// <summary>
+    /// Gets the entry ids of a track in a playlist (more than one when it was added twice).
+    /// </summary>
+    /// <param name="playlist">Playlist.</param>
+    /// <param name="trackId">Track id.</param>
+    /// <returns>Entry ids as used by the remove call.</returns>
+    public static List<string> EntryIdsOf(Playlist playlist, Guid trackId)
+    {
+        return playlist.LinkedChildren
+            .Where(c => c.ItemId.HasValue && c.ItemId.Value.Equals(trackId))
+            .Select(c => c.ItemId!.Value.ToString("N", CultureInfo.InvariantCulture))
+            .ToList();
+    }
+
+    /// <summary>
     /// Appends tracks to the playlist.
     /// </summary>
     /// <param name="playlist">Playlist.</param>
@@ -220,8 +264,24 @@ public class PlaylistContentService
         var userData = _userDataManager.GetUserDataBatch(items, user);
         if (Plugin.Instance?.Configuration.SmartShuffleSkipDisliked ?? true)
         {
-            // Songs the caller disliked (Jellyfin's own rating) do not take part, unless nothing else is left.
-            items = SmartShuffler.WithoutDisliked(items, i => userData.TryGetValue(i.Id, out var d) && d.Likes == false);
+            // Songs the caller disliked (Jellyfin's own rating) do not take part, unless nothing else is left. The same
+            // goes for songs of a disliked album or artist, unless the song itself has a heart.
+            var containers = _containerDislikes.Read(user.Id);
+            var scope = ContainerDislikeRule.ParseScope(Plugin.Instance?.Configuration.SmartShuffleArtistDislikeScope);
+            items = SmartShuffler.WithoutDisliked(items, i =>
+            {
+                if (userData.TryGetValue(i.Id, out var d) && d.Likes == false)
+                {
+                    return true;
+                }
+
+                if (containers.IsEmpty || (d is not null && d.IsFavorite) || i is not Audio song)
+                {
+                    return false;
+                }
+
+                return ContainerDislikeRule.Covers(containers, AlbumIdOf(song), song.AlbumArtists, song.Artists, scope);
+            });
         }
 
         var waiting = pending is null ? null : new HashSet<Guid>(pending);

@@ -25,8 +25,17 @@
                 </label>
                 <label class="checkboxContainer">
                     <input is="emby-checkbox" type="checkbox" id="SmartShuffleSkipDisliked" />
-                    <span>Smart shuffle leaves out songs the user disliked</span>
+                    <span>Smart shuffle leaves out songs the user disliked, and songs of albums and artists the user disliked</span>
                 </label>
+                <div class="fieldDescription checkboxFieldDescription">A song with a heart stays in. Albums and artists are disliked with the Dislike plugin or any client that rates them; this plugin reads the ratings itself.</div>
+                <div class="selectContainer">
+                    <label class="selectLabel" for="SmartShuffleArtistDislikeScope">Songs a disliked artist covers in smart shuffle</label>
+                    <select is="emby-select" id="SmartShuffleArtistDislikeScope" class="emby-select-withcolor emby-select">
+                        <option value="AlbumArtist">Songs of the artist's own albums (album artist)</option>
+                        <option value="AlbumOrMainArtist">Album artist, or first-named artist of the song</option>
+                        <option value="AnyArtist">Every song the artist appears on, guests included</option>
+                    </select>
+                </div>
                 <label class="checkboxContainer">
                     <input is="emby-checkbox" type="checkbox" id="EditorsCanEditDetails" />
                     <span>Users with edit permission may change image and description (not only the owner)</span>
@@ -52,6 +61,42 @@
                     <label class="inputLabel inputLabelUnfocused" for="MaxImportSizeKb">Maximum M3U import size (KB)</label>
                     <input is="emby-input" type="number" id="MaxImportSizeKb" min="1" required />
                 </div>
+                <h3 class="sectionTitle" style="margin-top:1.5em">Automatic playlists</h3>
+                <div class="fieldDescription">Every user gets read-only playlists that fill themselves from favourites and dislikes. Songs only. They are created with the first matching song and updated within a few seconds of a change. Switching a kind off deletes its playlists for all users.</div>
+                <label class="checkboxContainer">
+                    <input is="emby-checkbox" type="checkbox" id="EnableFavoritesPlaylist" />
+                    <span>Favourites playlist for every user</span>
+                </label>
+                <label class="checkboxContainer">
+                    <input is="emby-checkbox" type="checkbox" id="EnableDislikesPlaylist" />
+                    <span>Dislikes playlist for every user</span>
+                </label>
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="FavoritesPlaylistName">Name of the favourites playlist</label>
+                    <input is="emby-input" type="text" id="FavoritesPlaylistName" required />
+                    <div class="fieldDescription">One name for all users. A changed name renames the existing playlists.</div>
+                </div>
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="DislikesPlaylistName">Name of the dislikes playlist</label>
+                    <input is="emby-input" type="text" id="DislikesPlaylistName" required />
+                </div>
+                <label class="checkboxContainer">
+                    <input is="emby-checkbox" type="checkbox" id="AutoPlaylistNewestFirst" />
+                    <span>New songs at the top of the playlist (off: at the end)</span>
+                </label>
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="AutoPlaylistSyncDelaySeconds">Seconds to wait after a change before the playlist is updated (0 to 60)</label>
+                    <input is="emby-input" type="number" id="AutoPlaylistSyncDelaySeconds" min="0" max="60" required />
+                </div>
+                <label class="checkboxContainer">
+                    <input is="emby-checkbox" type="checkbox" id="EnableArtistSortFix" />
+                    <span>Sort artists without a leading article ("Die Antwoord" under A)</span>
+                </label>
+                <div class="inputContainer">
+                    <label class="inputLabel inputLabelUnfocused" for="SortArticles">Articles at the start of an artist name, comma separated (whole first word only)</label>
+                    <input is="emby-input" type="text" id="SortArticles" />
+                    <div class="fieldDescription">Shown behind the name in the web client (each user can switch that off) and used as sort name of the artist. The server's own list of ignored words is not changed.</div>
+                </div>
                 <div>
                     <button is="emby-button" type="submit" class="raised button-submit block emby-button"><span>Save</span></button>
                 </div>
@@ -66,14 +111,16 @@
     <script type="text/javascript">
         (function () {
             var pluginId = 'fd26499b-e4c1-4a7d-8648-a898f06e647b';
-            var checkboxes = ['InjectClientScript', 'EnableTrackTable', 'EnableDuplicateWarning', 'SmartShuffleSkipDisliked', 'EditorsCanEditDetails'];
-            var numbers = ['MaxQueueSize', 'SmartShuffleRecentHours', 'MaxImageSizeMb', 'MaxDescriptionLength', 'MaxImportSizeKb'];
+            var checkboxes = ['InjectClientScript', 'EnableTrackTable', 'EnableDuplicateWarning', 'SmartShuffleSkipDisliked', 'EditorsCanEditDetails', 'EnableFavoritesPlaylist', 'EnableDislikesPlaylist', 'AutoPlaylistNewestFirst', 'EnableArtistSortFix'];
+            var texts = ['FavoritesPlaylistName', 'DislikesPlaylistName', 'SmartShuffleArtistDislikeScope', 'SortArticles'];
+            var numbers = ['MaxQueueSize', 'SmartShuffleRecentHours', 'MaxImageSizeMb', 'MaxDescriptionLength', 'MaxImportSizeKb', 'AutoPlaylistSyncDelaySeconds'];
             var page = document.querySelector('#PlaylistToolkitConfigPage');
 
             page.addEventListener('pageshow', function () {
                 Dashboard.showLoadingMsg();
                 ApiClient.getPluginConfiguration(pluginId).then(function (config) {
                     checkboxes.forEach(function (id) { page.querySelector('#' + id).checked = !!config[id]; });
+                    texts.forEach(function (id) { page.querySelector('#' + id).value = config[id] || (id === 'SmartShuffleArtistDislikeScope' ? 'AlbumOrMainArtist' : ''); });
                     numbers.forEach(function (id) { page.querySelector('#' + id).value = config[id]; });
                     Dashboard.hideLoadingMsg();
                 });
@@ -92,6 +139,7 @@
                 Dashboard.showLoadingMsg();
                 ApiClient.getPluginConfiguration(pluginId).then(function (config) {
                     checkboxes.forEach(function (id) { config[id] = page.querySelector('#' + id).checked; });
+                    texts.forEach(function (id) { config[id] = page.querySelector('#' + id).value.trim(); });
                     numbers.forEach(function (id) { config[id] = parseInt(page.querySelector('#' + id).value, 10); });
                     ApiClient.updatePluginConfiguration(pluginId, config).then(Dashboard.processPluginConfigurationUpdateResult);
                 });

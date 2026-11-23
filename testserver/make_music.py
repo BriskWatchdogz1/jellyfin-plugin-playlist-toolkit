@@ -69,6 +69,15 @@ def private_set():
     return tracks
 
 
+def article_set():
+    """Artists with a leading article (and look-alikes that must stay as they are)."""
+    tracks = []
+    for n, artist in enumerate(["The Test Band", "Die Testband", "Diesel Test", "Theory Test", "The"]):
+        title = f"Article Song {n + 1}"
+        tracks.append((ROOT / "articles" / artist / "Article Album" / f"01 - {title}.opus", title, artist, "Article Album", 1, DURATIONS[n % len(DURATIONS)]))
+    return tracks
+
+
 def bulk_set():
     tracks = []
     for i in range(BULK_TRACKS):
@@ -84,7 +93,7 @@ def bulk_set():
 def main():
     for seconds in DURATIONS:
         base_file(seconds)
-    tracks = small_set() + bulk_set() + private_set()
+    tracks = small_set() + bulk_set() + private_set() + article_set()
     with concurrent.futures.ThreadPoolExecutor(max_workers=os.cpu_count() or 4) as pool:
         list(pool.map(make, tracks))
     print(f"{len(tracks)} tracks under {ROOT} and {PRIVATE_ROOT}")

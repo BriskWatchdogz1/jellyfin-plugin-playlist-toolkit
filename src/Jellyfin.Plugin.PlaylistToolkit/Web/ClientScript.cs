@@ -29,6 +29,10 @@ public static class ClientScript
             ?? throw new InvalidOperationException("Embedded client script is missing.");
         using var buffer = new MemoryStream();
         stream.CopyTo(buffer);
-        return buffer.ToArray();
+        // The script carries the version of the plugin that serves it (token __PT_VERSION__), so the script can tell when the
+        // page is older than the server. The content hash in the URL changes with it.
+        var text = System.Text.Encoding.UTF8.GetString(buffer.ToArray())
+            .Replace("__PT_VERSION__", typeof(Plugin).Assembly.GetName().Version?.ToString() ?? string.Empty, StringComparison.Ordinal);
+        return System.Text.Encoding.UTF8.GetBytes(text);
     }
 }

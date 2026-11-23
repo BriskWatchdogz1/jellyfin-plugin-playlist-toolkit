@@ -13,6 +13,7 @@
     <!-- With runtime assets, so plugin types that mention Jellyfin types can load in the test host. -->
     <PackageReference Include="Jellyfin.Controller" Version="$(JellyfinVersion)" />
     <PackageReference Include="Jellyfin.Model" Version="$(JellyfinVersion)" />
+    <PackageReference Include="Jellyfin.Database.Implementations" Version="$(JellyfinVersion)" />
   </ItemGroup>
 
   <ItemGroup>

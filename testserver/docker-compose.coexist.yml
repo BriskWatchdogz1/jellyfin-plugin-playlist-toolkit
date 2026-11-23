@@ -1,0 +1,5 @@
+# Added by deploy.sh when DISLIKE_BUILD is set: the Dislike plugin next to this one.
+services:
+  jellyfin-test:
+    volumes:
+      - ./.state/dislike:/config/data/plugins/Dislike
